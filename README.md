@@ -1,3 +1,5 @@
+> **[▶ Live demo](https://aftabmulani11.github.io/greenstay/)** — free demo mode: all APIs are mocked in the browser with sample data (Hotel login `DEMO01`/`demo123`, guest `guest@demo.com`). No AWS resources used.
+
 <div align="center">
 
 # 🏨 GreenStay — Hotel Operations Platform

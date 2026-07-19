@@ -1,22 +1,75 @@
-# GreenStay — Hotel Operations Platform
+<div align="center">
 
-A containerized hotel operations platform with an **asynchronous, decoupled AWS email pipeline** — built to model production-style, fault-tolerant cloud architecture.
+# 🏨 GreenStay — Hotel Operations Platform
+
+**Production-style, fault-tolerant cloud architecture: if the email service dies, bookings keep flowing.**
+
+![AWS](https://img.shields.io/badge/AWS-0b0b0e?style=for-the-badge&logo=amazonwebservices&logoColor=FF9900)
+![Flask](https://img.shields.io/badge/Flask-0b0b0e?style=for-the-badge&logo=flask&logoColor=white)
+![React](https://img.shields.io/badge/React-0b0b0e?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Docker](https://img.shields.io/badge/Docker-0b0b0e?style=for-the-badge&logo=docker&logoColor=2496ED)
+![Jenkins](https://img.shields.io/badge/Jenkins-0b0b0e?style=for-the-badge&logo=jenkins&logoColor=D24939)
+
+</div>
 
 ## Architecture
 
-**4 independent services**, orchestrated with Docker Compose:
+**4 independent services** — web, API, worker, notification — so a failure in any one never cascades:
 
 ```
-┌──────────┐     ┌──────────┐     ┌───────────┐     ┌──────────────┐
-│  Web     │ ──▶ │  API     │ ──▶ │  Worker   │ ──▶ │ Notification │
-│ (React)  │     │ (Flask)  │     │  (SQS)    │     │ (Lambda+SES) │
-└──────────┘     └──────────┘     └───────────┘     └──────────────┘
+   ┌─────────────┐    HTTP    ┌─────────────┐   enqueue   ┌─────────────┐   trigger   ┌─────────────┐
+   │    WEB      │ ─────────▶ │    API      │ ──────────▶ │   WORKER    │ ──────────▶ │NOTIFICATION │
+   │React+Tailwind│           │ Flask REST  │             │  AWS SQS    │             │ Lambda + SES│
+   └─────────────┘            └──────┬──────┘             └─────────────┘             └─────────────┘
+                                     │                     guaranteed                   email delivery
+                                     ▼                     delivery, retries,           fully decoupled
+                              ┌─────────────┐              dead-letter safety           from request path
+                              │  DynamoDB   │
+                              │single-table │
+                              │  + GSI      │
+                              └─────────────┘
 ```
 
-- **9 REST endpoints** (Flask) backing the React frontend
-- **Async 3-stage email pipeline** — SQS → Lambda → SES decouples email delivery from the request path; a slow or failing email never blocks a booking
-- **DynamoDB** single-table design with GSI for email lookups
-- **4-stage Jenkins pipeline** modeling production delivery ([jenkinsfile](jenkinsfile))
+### Why the async 3-stage pipeline matters
+
+A hotel booking triggers a confirmation email. Naïve design sends it inline — if SES is slow or down, **the guest's booking request hangs or fails**. GreenStay instead:
+
+1. **API** writes the booking to DynamoDB and drops a message on **SQS** — request returns immediately
+2. **SQS** guarantees delivery with retries and dead-letter safety
+3. **Lambda** consumes the queue and sends via **SES** — email latency never touches the user
+
+## REST API (9 endpoints)
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/login` | POST | Hotel-staff authentication |
+| `/api/hotel-registration` | POST | Onboard a new hotel |
+| `/api/guests` | POST | Register guest / create booking (enqueues email) |
+| `/api/guests/<hotel_id>` | GET | List a hotel's guests |
+| `/api/guest-portal/<booking_id>` | GET | Guest self-service portal data |
+| `/calculate` | POST | Stay-cost calculation |
+| `/api/download/hotel/<hotel_id>` | GET | Hotel data export |
+| `/api/download/guest` | POST | Guest data export |
+
+## Data layer
+
+**DynamoDB single-table design** — hotels and guests share one table using `PK`/`SK` composite keys (`HOTEL#id` / `METADATA`, …) with a **GSI on email** for reverse lookups. One table, no joins, predictable single-digit-ms reads.
+
+## CI/CD — 4-stage Jenkins pipeline
+
+```
+Checkout ──▶ Build Locally ──▶ Login & Push to ECR ──▶ Deploy to Elastic Beanstalk
+```
+
+Docker images for backend and frontend are built from [DevOps/](DevOps/) Dockerfiles, pushed to **ECR**, and deployed to **Elastic Beanstalk** — modeled production-style with AWS credentials injected via Jenkins credentials store.
+
+## Run locally
+
+```bash
+docker-compose up --build
+# Frontend → http://localhost:3000
+# API      → http://localhost:5000
+```
 
 ## Tech stack
 
@@ -24,17 +77,9 @@ A containerized hotel operations platform with an **asynchronous, decoupled AWS 
 |---|---|
 | Frontend | React, Tailwind CSS |
 | Backend | Flask (Python), REST |
-| Async messaging | AWS SQS, Lambda, SES |
-| Database | DynamoDB |
+| Async pipeline | AWS SQS → Lambda → SES |
+| Database | DynamoDB (single-table + GSI) |
 | Containers | Docker, Docker Compose, Nginx |
-| CI/CD | Jenkins |
+| CI/CD | Jenkins → ECR → Elastic Beanstalk |
 
-## Run locally
-
-```bash
-docker-compose up --build
-```
-
-Frontend: `http://localhost:3000` · API: `http://localhost:5000`
-
-> AWS resources (SQS/SES/DynamoDB) require credentials via environment variables — nothing is hardcoded.
+> 🔒 No credentials in this repo — AWS access is environment-injected; the app degrades gracefully when AWS resources are unavailable.

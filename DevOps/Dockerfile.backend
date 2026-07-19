@@ -1,0 +1,23 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 1. Install system dependencies (optional, but good practice)
+RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. Install Python dependencies
+COPY backend/re.txt .
+# We explicitly install gunicorn here for production serving
+RUN pip install --no-cache-dir -r re.txt
+
+# 3. Copy Application Code
+COPY backend/ .
+
+# 4. Set Environment Variables
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=production
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 5000
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]

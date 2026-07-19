@@ -1,0 +1,159 @@
+pipeline {
+    agent any
+
+    triggers {
+        pollSCM('H/1 * * * *') 
+    }
+
+    environment {
+        // --- CREDENTIALS INJECTION ---
+        // This pulls the values directly from your Jenkins Credentials (shown in your screenshot).
+        // The credentials('ID') function securely binds the secret text to the variable.
+        AWS_REGION       = credentials('AWS_REGION_NAME')
+        AWS_ACCOUNT_ID   = credentials('AWS_ACCOUNT_ID')
+        SQS_QUEUE_URL    = credentials('SQS_QUEUE_URL')
+        SES_SENDER_EMAIL = credentials('SES_SENDER_EMAIL')
+        
+        // This stores the ID of your Username/Password credential to be used in 'withCredentials' blocks
+        AWS_CRED_ID      = 'AWS_CLI_CRED' 
+
+        // --- APP CONFIGURATION ---
+        ECR_BACKEND_REPO  = 'greenstay-app-backend'
+        ECR_FRONTEND_REPO = 'greenstay-app-frontend'
+
+        EB_APP_NAME       = 'greenapp'
+        EB_ENV_NAME       = 'greenapp-env'
+        S3_BUCKET         = 'green-app-bucket' 
+        
+        DEPLOY_ZIP        = "deploy-${env.BUILD_NUMBER}.zip"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+
+        stage('Build Locally') {
+            steps {
+                script {
+                    echo "Building Docker images..."
+                    // Manual build commands (Required because your agent lacks the Compose plugin)
+                    
+                    // 1. Build Backend
+                    sh 'docker build -t greenstay-app-backend:latest -f DevOps/Dockerfile.backend .'
+                    
+                    // 2. Build Frontend
+                    sh 'docker build -t greenstay-app-frontend:latest -f DevOps/Dockerfile.frontend .'
+                }
+            }
+        }
+
+        stage('Login & Push to ECR') {
+            steps {
+                // Unlock the AWS_CLI_CRED (Access Key & Secret Key) for this block
+                withCredentials([usernamePassword(credentialsId: env.AWS_CRED_ID, usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    script {
+                        echo "Logging into AWS ECR..."
+                        
+                        // FIX: 
+                        // 1. Use single quotes (''') so Jenkins does not interpolate the secrets.
+                        // 2. Use $AWS_REGION (shell variable) instead of groovy variable.
+                        // 3. The AWS CLI automatically detects AWS_ACCESS_KEY_ID env vars set by withCredentials.
+                        sh '''
+                            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+                        '''
+
+                        def backendECR  = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_BACKEND_REPO}"
+                        def frontendECR = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_FRONTEND_REPO}"
+                        
+                        // Push Backend
+                        sh "docker tag greenstay-app-backend:latest ${backendECR}:${env.BUILD_NUMBER}"
+                        sh "docker push ${backendECR}:${env.BUILD_NUMBER}"
+                        
+                        // Push Frontend
+                        sh "docker tag greenstay-app-frontend:latest ${frontendECR}:${env.BUILD_NUMBER}"
+                        sh "docker push ${frontendECR}:${env.BUILD_NUMBER}"
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Elastic Beanstalk') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: env.AWS_CRED_ID, usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    script {
+                        def backendImg  = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_BACKEND_REPO}:${env.BUILD_NUMBER}"
+                        def frontendImg = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_FRONTEND_REPO}:${env.BUILD_NUMBER}"
+
+                        echo "Generating Production docker-compose.yml..."
+                        
+                        // We use Groovy interpolation here (${env.VAR}) to write the VALUES into the file
+                        writeFile file: 'docker-compose.yml', text: """
+version: '3.8'
+services:
+  backend:
+    image: ${backendImg}
+    expose:
+      - "5000"
+    environment:
+      - AWS_REGION_NAME=${env.AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${env.AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${env.AWS_SECRET_ACCESS_KEY}
+      - AWS_SES_SENDER_EMAIL=${env.SES_SENDER_EMAIL}
+      - SQS_QUEUE_URL=${env.SQS_QUEUE_URL}
+    restart: always
+
+  frontend:
+    image: ${frontendImg}
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always
+"""
+                        // Deploy steps
+                        sh "zip ${env.DEPLOY_ZIP} docker-compose.yml"
+                        
+                        // We do NOT need to manually export keys here. 
+                        // The AWS CLI commands below automatically pick up the keys from 'withCredentials'.
+                        sh """
+                            aws s3 cp ${env.DEPLOY_ZIP} s3://${env.S3_BUCKET}/${env.DEPLOY_ZIP} --region ${env.AWS_REGION}
+                            
+                            aws elasticbeanstalk create-application-version \
+                            --application-name ${env.EB_APP_NAME} \
+                            --version-label ${env.BUILD_NUMBER} \
+                            --source-bundle S3Bucket=${env.S3_BUCKET},S3Key=${env.DEPLOY_ZIP} \
+                            --region ${env.AWS_REGION}
+                            
+                            aws elasticbeanstalk update-environment \
+                            --environment-name ${env.EB_ENV_NAME} \
+                            --version-label ${env.BUILD_NUMBER} \
+                            --region ${env.AWS_REGION}
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "Cleaning up..."
+                
+                // 1. Remove local build images
+                sh 'docker rmi greenstay-app-backend:latest || true'
+                sh 'docker rmi greenstay-app-frontend:latest || true'
+                
+                // 2. Remove ECR tagged images to save disk space
+                def backendECR  = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_BACKEND_REPO}"
+                def frontendECR = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_FRONTEND_REPO}"
+                sh "docker rmi ${backendECR}:${env.BUILD_NUMBER} || true"
+                sh "docker rmi ${frontendECR}:${env.BUILD_NUMBER} || true"
+
+                // 3. Remove generated artifacts
+                sh "rm -f ${env.DEPLOY_ZIP} docker-compose.yml"
+            }
+        }
+    }
+}

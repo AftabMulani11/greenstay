@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Global Body Styles with Radial Gradient Background */
+  body {
+    @apply bg-background text-foreground antialiased font-sans min-h-screen selection:bg-primary/20;
+    background-image: radial-gradient(at 0% 0%, hsla(152, 100%, 96%, 1) 0, transparent 50%), 
+                      radial-gradient(at 100% 100%, hsla(152, 100%, 96%, 1) 0, transparent 50%);
+  }
+  
+  /* Standardizing Heading Typography */
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight font-bold;
+  }
+}
+
+/* * Custom Animations 
+ * Used for modal entry and page load transitions 
+ */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out forwards;
+}

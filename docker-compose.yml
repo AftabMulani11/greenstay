@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # Service name must be 'backend' for Nginx to find it
+  backend:
+    image: greenstay-app-backend:latest
+    build:
+      context: .
+      dockerfile: DevOps/Dockerfile.backend
+    expose:
+      - "5000"
+    environment:
+      - AWS_REGION_NAME=${AWS_REGION_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SES_SENDER_EMAIL=${AWS_SES_SENDER_EMAIL}
+    restart: always
+
+  frontend:
+    image: greenstay-app-frontend:latest
+    build:
+      context: .
+      dockerfile: DevOps/Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always

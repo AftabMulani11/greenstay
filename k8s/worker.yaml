@@ -1,0 +1,38 @@
+# In-cluster SQS consumer: the Kubernetes equivalent of backend/lambda_email.py.
+# Runs the same drain loop as a long-lived pod for clusters where email
+# processing should live next to the app instead of in AWS Lambda.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: greenstay
+  labels:
+    app: worker
+    app.kubernetes.io/part-of: greenstay
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: greenstay-app-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "worker.py"]
+          envFrom:
+            - configMapRef:
+                name: greenstay-config
+            - secretRef:
+                name: greenstay-aws
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

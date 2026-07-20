@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenstay-config
+  namespace: greenstay
+  labels:
+    app.kubernetes.io/part-of: greenstay
+data:
+  AWS_REGION_NAME: "eu-west-1"
+  # Non-secret config only. Credentials live in the greenstay-aws Secret.
+  AWS_SES_SENDER_EMAIL: "notifications@example.com"

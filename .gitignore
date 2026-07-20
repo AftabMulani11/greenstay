@@ -7,3 +7,6 @@ __pycache__/
 venv/
 *.db
 .DS_Store
+
+# Kubernetes credentials (copy of k8s/secret.example.yaml)
+k8s/secret.yaml

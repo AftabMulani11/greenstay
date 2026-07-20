@@ -12,6 +12,21 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
+# Prometheus metrics at /metrics (request rate, latency histograms, statuses).
+# Import guarded so environments without the exporter (e.g. Lambda) still run.
+try:
+    from prometheus_flask_exporter import PrometheusMetrics
+
+    metrics = PrometheusMetrics(app)
+except ImportError:
+    metrics = None
+
+
+@app.route("/healthz", methods=["GET"])
+def healthz():
+    # Liveness/readiness probe endpoint for Kubernetes and load balancers.
+    return jsonify({"status": "ok"}), 200
+
 
 @app.route("/api/login", methods=["POST"])
 def login():

@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: greenstay
+  labels:
+    app: frontend
+    app.kubernetes.io/part-of: greenstay
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: greenstay-app-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: greenstay
+  labels:
+    app: frontend
+    app.kubernetes.io/part-of: greenstay
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

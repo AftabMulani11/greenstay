@@ -1,4 +1,5 @@
 > **[▶ Live demo](https://aftabmulani11.github.io/greenstay/)** — free demo mode: all APIs are mocked in the browser with sample data (Hotel login `DEMO01`/`demo123`, guest `guest@demo.com`). No AWS resources used.
+> **Kubernetes:** [`k8s/`](k8s/) migrates all four services to Kubernetes (Deployments, HPA, Ingress, probes) with a Prometheus + Grafana monitoring stack — see [k8s/README.md](k8s/README.md).
 
 <div align="center">
 

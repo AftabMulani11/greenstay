@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: greenstay
+  labels:
+    app: backend
+    app.kubernetes.io/part-of: greenstay
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: backend
+          image: greenstay-app-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: greenstay-config
+            - secretRef:
+                name: greenstay-aws
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: greenstay
+  labels:
+    app: backend
+    app.kubernetes.io/part-of: greenstay
+spec:
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http

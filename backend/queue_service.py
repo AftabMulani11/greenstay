@@ -1,66 +1,64 @@
-import boto3
 import json
+import logging
 import os
+import smtplib
+from email.message import EmailMessage
+from functools import cached_property
+
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from dotenv import load_dotenv
 
+
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 class QueueService:
     def __init__(self):
-        """
-        Initializes the QueueService with AWS SQS credentials.
-        """
-        # Setting up SQS
-        region_name = os.getenv("AWS_REGION_NAME", "eu-west-1")
-        access_key = os.getenv("AWS_ACCESS_KEY_ID")
-        secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        self.transport = os.getenv("EMAIL_TRANSPORT", "sqs").strip().lower()
+        if self.transport not in {"sns", "sqs", "smtp"}:
+            raise ValueError("EMAIL_TRANSPORT must be sns, sqs, or smtp")
 
-        # I sometimes mix up whether the queue url is the ARN or URL... leaving a reminder here.
-        self.queue_url = os.getenv("SQS_QUEUE_URL")
-
-        try:
-            # Creating the SQS client
-            self.sqs_client = boto3.client(
-                "sqs",
-                region_name=region_name,
-                aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key,
-            )
-        except Exception as e:
-            print(f"Failed to initialize SQS client: {e}")
-            self.sqs_client = None
+    @cached_property
+    def aws_client(self):
+        region = os.getenv("AWS_REGION_NAME") or os.getenv("AWS_REGION") or "us-east-1"
+        return boto3.client(self.transport, region_name=region)
 
     def push_email_job(self, receiver_email, mail_subject, message_body):
-        """
-        Sends an email job into SQS.
-        """
-        # Safety check if client failed to init
-        if not getattr(self, "sqs_client", None) or not self.queue_url:
-            print("Configuration issue: SQS client not ready or missing SQS_QUEUE_URL.")
-            return False
-
-        payload_dict = {
+        payload = {
             "to_address": receiver_email,
             "subject": mail_subject,
             "body": message_body,
         }
-
-        stringified_payload = json.dumps(payload_dict)
-
         try:
-            resp = self.sqs_client.send_message(
-                QueueUrl=self.queue_url, MessageBody=stringified_payload
-            )
-
-            print("Raw SQS response:", resp)
-            print(f"[SQS] Queued email job for {receiver_email}")
-            return True
-
-        except Exception as err:
-            print(f"[SQS] Couldn't push message to queue: {err}")
+            if self.transport == "smtp":
+                self.send_smtp(payload)
+            else:
+                self.publish(json.dumps(payload))
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError):
+            logger.exception("Email delivery via %s failed", self.transport)
             return False
+        return True
+
+    def publish(self, message):
+        if self.transport == "sns":
+            topic = os.environ["SNS_TOPIC_ARN"]
+            self.aws_client.publish(TopicArn=topic, Message=message)
+        else:
+            queue_url = os.environ["SQS_QUEUE_URL"]
+            self.aws_client.send_message(QueueUrl=queue_url, MessageBody=message)
+
+    def send_smtp(self, payload):
+        message = EmailMessage()
+        message["From"] = os.getenv("SMTP_FROM", "greenstay@example.test")
+        message["To"] = payload["to_address"]
+        message["Subject"] = payload["subject"]
+        message.set_content(payload["body"])
+        host = os.getenv("SMTP_HOST", "localhost")
+        port = int(os.getenv("SMTP_PORT", "1025"))
+        with smtplib.SMTP(host, port, timeout=5) as client:
+            client.send_message(message)
 
 
-# Instantiate the service
 queue_service = QueueService()

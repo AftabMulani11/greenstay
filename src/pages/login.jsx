@@ -2,7 +2,10 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Label, Input, Button } from "../components/ui";
 import { toast } from "sonner";
-import { ArrowLeft, Lock, User as UserIcon, Building2, Hash, User, Mail, Phone } from "lucide-react";
+import { ArrowLeft, User as UserIcon, Building2, User, Mail, Phone } from "lucide-react";
+import { postJson } from "../utils/api";
+
+const publicDemo = process.env.REACT_APP_PUBLIC_DEMO === "true";
 
 export default function Login() {
   const { type } = useParams();
@@ -17,8 +20,8 @@ export default function Login() {
   const [customerData, setCustomerData] = useState({ guestName: "", email: "", phoneNumber: "" });
   
   // State for Registration (Hotel only)
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); // New state for loading
+  const [isRegistering, setIsRegistering] = useState(() => publicDemo && isHotel && !localStorage.getItem("hotel_id"));
+  const [isProcessing, setIsProcessing] = useState(false);
   const [regData, setRegData] = useState({ hotelName: "", hotelEmail: "", password: "" });
 
   const handleLogin = async (e) => {
@@ -27,7 +30,7 @@ export default function Login() {
       let payload = {};
       
       if (isHotel) {
-        payload = { 
+        payload = publicDemo ? { type: "hotel" } : {
           type: "hotel",
           id: hotelData.id,
           password: hotelData.password
@@ -41,16 +44,13 @@ export default function Login() {
         };
       }
 
-      const response = await fetch('/api/login', { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const response = await postJson('/api/login', payload);
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || data.status || "Login failed");
+        if (publicDemo && isHotel && response.status === 404) setIsRegistering(true);
+        throw new Error(data.message || data.status || "Could not open dashboard");
       }
 
       if (isHotel) {
@@ -66,7 +66,7 @@ export default function Login() {
       toast.success(`Welcome back!`);
     } catch (error) {
       console.error(error);
-      toast.error(error.message || "Login failed. Please check credentials.");
+      toast.error(error.message || "Could not open dashboard.");
     }
   };
 
@@ -74,20 +74,21 @@ export default function Login() {
     e.preventDefault();
     setIsProcessing(true); // Disable button and show processing
     try {
-      const response = await fetch('/api/hotel-registration', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hotel_name: regData.hotelName,
-          hotel_email: regData.hotelEmail,
-          password: regData.password
-        })
+      const response = await postJson('/api/hotel-registration', {
+        hotel_name: regData.hotelName,
+        hotel_email: regData.hotelEmail,
+        ...(publicDemo ? {} : { password: regData.password }),
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.status || "Registration failed");
 
       toast.success("Registration Successful!");
+
+      if (publicDemo) {
+        navigate("/hotel-dashboard", { state: { hotelName: regData.hotelName, hotel_id: data.hotel_id } });
+        return;
+      }
       
       toast.message("Save your Hotel ID!", {
         description: `Your Login ID is: ${data.hotel_id}`,
@@ -114,7 +115,7 @@ export default function Login() {
       <Card className="w-full max-w-md shadow-2xl border-none animate-slide-up">
         <CardHeader className="space-y-1 text-center pb-6">
           <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isHotel ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
-            {isHotel ? (isRegistering ? <Building2 className="w-6 h-6"/> : <Lock className="w-6 h-6" />) : <UserIcon className="w-6 h-6" />}
+            {isHotel ? <Building2 className="w-6 h-6" /> : <UserIcon className="w-6 h-6" />}
           </div>
           <CardTitle className="text-2xl">
             {isHotel 
@@ -124,6 +125,8 @@ export default function Login() {
           <CardDescription>
             {isHotel && isRegistering 
               ? "Create a new account for your property" 
+              : isHotel && publicDemo ? "Open the hotel created in this browser"
+              : publicDemo ? "Enter the guest details from your demo booking"
               : "Sign in to view your sustainability dashboard"}
           </CardDescription>
         </CardHeader>
@@ -133,7 +136,7 @@ export default function Login() {
             <form onSubmit={handleLogin} className="space-y-5">
               
               {/* HOTEL LOGIN INPUTS */}
-              {isHotel && (
+              {isHotel && !publicDemo && (
                 <>
                   <div className="space-y-2">
                     <Label>Hotel ID</Label>
@@ -162,7 +165,7 @@ export default function Login() {
               {/* CUSTOMER LOGIN INPUTS */}
               {!isHotel && (
                 <>
-                  <div className="space-y-2">
+                  {!publicDemo && <div className="space-y-2">
                     <Label>Guest Name</Label>
                     <div className="relative">
                       <User className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -174,7 +177,7 @@ export default function Login() {
                         required
                       />
                     </div>
-                  </div>
+                  </div>}
                   <div className="space-y-2">
                     <Label>Email Address</Label>
                     <div className="relative">
@@ -189,7 +192,7 @@ export default function Login() {
                       />
                     </div>
                   </div>
-                  <div className="space-y-2">
+                  {!publicDemo && <div className="space-y-2">
                     <Label>Phone Number</Label>
                     <div className="relative">
                       <Phone className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -202,7 +205,7 @@ export default function Login() {
                         required
                       />
                     </div>
-                  </div>
+                  </div>}
                 </>
               )}
               
@@ -228,7 +231,7 @@ export default function Login() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Official Email</Label>
+                <Label>{publicDemo ? "Sample Email" : "Official Email"}</Label>
                 <Input 
                   type="email"
                   placeholder="admin@hotel.com" 
@@ -238,7 +241,7 @@ export default function Login() {
                   required
                 />
               </div>
-              <div className="space-y-2">
+              {!publicDemo && <div className="space-y-2">
                 <Label>Set Password</Label>
                 <Input 
                   type="password"
@@ -248,7 +251,7 @@ export default function Login() {
                   className="bg-slate-50"
                   required
                 />
-              </div>
+              </div>}
               
               <div className="pt-2">
                 <Button type="submit" className="w-full bg-primary hover:bg-primary/90" disabled={isProcessing}>
@@ -266,7 +269,9 @@ export default function Login() {
                 onClick={() => setIsRegistering(!isRegistering)}
                 className="text-sm text-slate-500 hover:text-primary underline underline-offset-4 transition-colors"
               >
-                {isRegistering ? "Already have an account? Login" : "Don't have an ID? Register New Hotel"}
+                {publicDemo
+                  ? (isRegistering ? "Open this browser's hotel" : "Register a new hotel")
+                  : (isRegistering ? "Already have an account? Login" : "Don't have an ID? Register New Hotel")}
               </button>
             </div>
           )}

@@ -6,3 +6,4 @@ argon2-cffi
 gunicorn
 greenstay-lib
 prometheus-flask-exporter
+psycopg2-binary

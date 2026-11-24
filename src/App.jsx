@@ -22,7 +22,6 @@ const App = () => (
         {/* Dynamic route for login type (hotel or customer) */}
         <Route path="/login/:type" element={<Login />} />
         
-        {/* Protected Routes */}
         <Route path="/hotel-dashboard" element={<HotelDashboard />} />
         <Route path="/guest/:id" element={<GuestEntry />} /> 
         <Route path="/customer-dashboard" element={<CustomerDashboard />} />

@@ -1,12 +1,32 @@
 node_modules/
 build/
 dist/
+coverage/
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .env
+.env.*
+!.env.example
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
 venv/
 *.db
 .DS_Store
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.example.tfvars
+*.tfplan
+/destroy.local.ps1
+crash.log
 
-# Kubernetes credentials (copy of k8s/secret.example.yaml)
+graphify-out/
+.graphifyignore
+.graphify_analysis.json
+
 k8s/secret.yaml

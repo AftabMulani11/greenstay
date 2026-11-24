@@ -16,16 +16,15 @@ GreenStay is an AWS SAA-C03 reference deployment in `us-east-1`. Keep the deploy
 
 ## Current state
 
-- The Part 1 Compose build and smoke test passed. Git baseline `666e9cb` precedes cleanup commit `8a4bc31`.
-- The previous AWS demo was destroyed. The consolidated root is ready for a fresh deployment. Use the `demo_url` output after deploying.
+- Use the `demo_url` output after deploying.
 - Terraform generates the database password into SSM and reads it for RDS through an ephemeral resource. Both writes use `database_password_version`. Keep the state private because it contains the proxy token and session signing key.
 - The deployment pins the backend image by digest and publishes React under `site/<release>/`. The Flask port stays closed to internet traffic. Hotel registration starts a password-free session scoped to the sample property in that browser. Guests use the email entered during check-in in the same browser. Demo emails go to the verified SES inbox.
 
 ## Local verification
 
-- Run `docker compose up --build -d --wait` and `./DevOps/smoke-test.ps1` from the project root. Compose selects PostgreSQL and Mailpit SMTP. Nginx serves React and proxies `/api` to Flask. The GitHub Pages build opts into the browser-only demo with `REACT_APP_DEMO=true`.
+- Run `docker compose up --build -d --wait` and `./DevOps/smoke-test.ps1` from the project root. Compose selects PostgreSQL and Mailpit SMTP. Nginx serves React and proxies `/api` to Flask.
 - Keep the `DB_BACKEND` PostgreSQL/DynamoDB switch and the `EMAIL_TRANSPORT` SMTP/SNS/SQS switch. The AWS SQS event source mapping must enable `ReportBatchItemFailures` and the source queue must redrive failures to its DLQ.
-- Refresh the local graph with `graphify update .` after changing code when a local graph exists. Keep generated graph files out of commits. Update `package-lock.json` when frontend dependencies change so Docker and GitHub Pages can use `npm ci`.
+- Refresh the local graph with `graphify update .` after changing code when a local graph exists. Keep generated graph files out of commits. Update `package-lock.json` when frontend dependencies change so Docker can use `npm ci`.
 
 ## Repository conventions
 

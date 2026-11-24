@@ -46,7 +46,7 @@ greenstay/
 │   ├── Email_templates.py
 │   ├── lambda_email.py
 │   └── re.txt
-├── src/ & public/                    # React frontend and GitHub Pages demo
+├── src/ & public/                    # React frontend
 ├── DevOps/                           # Dockerfiles, local smoke test, and AWS deploy script
 ├── greenstay_aws_terraform_deployment_plan.md
 └── infra/                            # One Terraform root and state

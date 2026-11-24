@@ -187,7 +187,7 @@ export default function GuestEntry() {
 
               </div>
             ) : (
-                <form onSubmit={handleUpdate} className="space-y-6 animate-fade-in">
+                <form onSubmit={handleUpdate} className="space-y-6">
                     <div className="grid grid-cols-2 gap-6">
                        <div className="space-y-2">
                          <Label>Electricity (kWh)</Label>

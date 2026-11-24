@@ -35,14 +35,6 @@ def demo_hotel_id():
 def booking_email(recipient, subject, body):
     return queue_service.push_email_job(demo_email_recipient if public_demo else recipient, subject, body)
 
-try:
-    from prometheus_flask_exporter import PrometheusMetrics
-
-    PrometheusMetrics(app)
-except ImportError:
-    pass
-
-
 @app.before_request
 def check_origin():
     if origin_token and request.path != "/healthz":

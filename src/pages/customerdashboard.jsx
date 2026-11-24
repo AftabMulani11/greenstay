@@ -293,7 +293,7 @@ export default function CustomerDashboard() {
                 </div>
                 
                 {Number(guestData.discount) > 0 ? (
-                  <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 flex items-center gap-4 animate-pulse-slow">
+                  <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 flex items-center gap-4">
                     <div className="p-3 bg-white rounded-full shadow-sm">
                         <Award className="w-6 h-6 text-emerald-600" />
                     </div>

@@ -4,21 +4,18 @@ import { X, ChevronDown, Check } from "lucide-react"
 
 /**
  * Reusable Button Component
- * Supports multiple variants (default, outline, ghost, danger, secondary) and sizes.
+ * Supports multiple variants and sizes.
  */
 const Button = React.forwardRef(({ className, variant = "default", size = "default", ...props }, ref) => {
   const variants = {
     default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-glow shadow-primary/30 border border-transparent",
     outline: "border border-primary text-primary bg-transparent hover:bg-primary/5",
     ghost: "hover:bg-black/5 text-foreground/70 hover:text-foreground",
-    danger: "bg-danger text-white hover:bg-danger/90",
     secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm",
   }
   const sizes = {
     default: "h-10 px-5 py-2",
     sm: "h-8 rounded-md px-3 text-xs",
-    lg: "h-12 rounded-lg px-8 text-lg",
-    icon: "h-10 w-10 p-2",
   }
   return (
     <button
@@ -90,7 +87,7 @@ const Select = ({ value, onChange, options = [], placeholder = "Select...", clas
       </button>
 
       {isOpen && (
-        <div className="absolute z-50 mt-1 max-h-60 w-max min-w-full max-w-[350px] overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute z-50 mt-1 max-h-60 w-max min-w-full max-w-[350px] overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
           {options.length === 0 ? (
             <div className="px-2 py-2 text-sm text-slate-500 text-center">No options</div>
           ) : (
@@ -234,8 +231,8 @@ TableCell.displayName = "TableCell"
 const Modal = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in font-sans">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6 animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm font-sans">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-bold text-primary">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X className="w-5 h-5" /></button>

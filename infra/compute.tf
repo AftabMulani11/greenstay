@@ -10,7 +10,7 @@ locals {
     PGUSER                  = aws_ssm_parameter.database_username.name
     PGPASSWORD              = aws_ssm_parameter.database_password.name
     CLOUDFRONT_ORIGIN_TOKEN = aws_ssm_parameter.origin_token.name
-    DEMO_SESSION_KEY        = aws_ssm_parameter.demo_session_key.name
+    SESSION_SIGNING_KEY     = aws_ssm_parameter.session_signing_key.name
   }
   task_secret_arns = {
     for name, path in local.task_secret_names :
@@ -39,7 +39,7 @@ resource "aws_security_group" "origin" {
 resource "aws_vpc_security_group_ingress_rule" "web" {
   for_each          = toset(["80", "443"])
   security_group_id = aws_security_group.origin.id
-  description       = each.key == "80" ? "ACME validation and HTTPS redirect" : "GreenStay demo HTTPS"
+  description       = each.key == "80" ? "ACME validation and HTTPS redirect" : "GreenStay HTTPS"
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "tcp"
   from_port         = tonumber(each.key)
@@ -59,17 +59,17 @@ resource "aws_ssm_parameter" "origin_token" {
   value       = random_password.origin_token.result
 }
 
-resource "random_password" "demo_session_key" {
+resource "random_password" "session_signing_key" {
   length  = 40
   special = false
 }
 
-resource "aws_ssm_parameter" "demo_session_key" {
-  name        = "/${var.project_name}/demo/session-key"
-  description = "Signing key for isolated browser demo sessions"
+resource "aws_ssm_parameter" "session_signing_key" {
+  name        = "/${var.project_name}/app/session-signing-key"
+  description = "Signing key for authenticated hotel sessions"
   type        = "SecureString"
   tier        = "Standard"
-  value       = random_password.demo_session_key.result
+  value       = random_password.session_signing_key.result
 }
 
 resource "aws_iam_role" "host" {
@@ -334,16 +334,16 @@ resource "aws_launch_template" "host" {
     image='docker.io/library/caddy:2.11.8-alpine@sha256:f6228111e5fafa1a5238258d0858e103f10599b8d1659a146e7726681a002bb9'
     docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
     origin_token=$(aws ssm get-parameter --name '${aws_ssm_parameter.origin_token.name}' --with-decryption --query 'Parameter.Value' --output text)
-    export ORIGIN_TOKEN="$origin_token" DEMO_IP='${aws_eip.origin.public_ip}'
+    export ORIGIN_TOKEN="$origin_token" SITE_IP='${aws_eip.origin.public_ip}'
     exec docker run --rm --name greenstay-web --network host \
-      --env ORIGIN_TOKEN --env DEMO_IP \
+      --env ORIGIN_TOKEN --env SITE_IP \
       --volume /opt/greenstay/Caddyfile:/etc/caddy/Caddyfile:ro \
       --volume /opt/greenstay/site:/srv:ro --volume greenstay-caddy-data:/data "$image"
     STARTWEB
     chmod 0700 /opt/greenstay/start-web
     cat > /etc/systemd/system/greenstay-web.service <<'SERVICE'
     [Unit]
-    Description=GreenStay HTTPS demo
+    Description=GreenStay HTTPS
     Wants=network-online.target
     Requires=docker.service
     After=network-online.target docker.service
@@ -427,16 +427,14 @@ resource "aws_ecs_task_definition" "backend" {
 
     environment = [
       for name, value in {
-        DB_BACKEND           = "postgres"
-        PGHOST               = aws_db_instance.postgres.address
-        PGPORT               = tostring(aws_db_instance.postgres.port)
-        PGDATABASE           = aws_db_instance.postgres.db_name
-        PGSSLMODE            = "require"
-        EMAIL_TRANSPORT      = "sns"
-        SNS_TOPIC_ARN        = aws_sns_topic.email.arn
-        AWS_REGION_NAME      = local.region
-        PUBLIC_DEMO          = "true"
-        DEMO_EMAIL_RECIPIENT = aws_ses_email_identity.sender.email
+        DB_BACKEND      = "postgres"
+        PGHOST          = aws_db_instance.postgres.address
+        PGPORT          = tostring(aws_db_instance.postgres.port)
+        PGDATABASE      = aws_db_instance.postgres.db_name
+        PGSSLMODE       = "require"
+        EMAIL_TRANSPORT = "sns"
+        SNS_TOPIC_ARN   = aws_sns_topic.email.arn
+        AWS_REGION_NAME = local.region
       } : { name = name, value = value }
     ]
 

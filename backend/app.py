@@ -2,7 +2,6 @@ import csv
 import hmac
 import io
 import os
-from secrets import token_urlsafe
 from datetime import datetime
 
 from flask import Flask, Response, jsonify, request, session, stream_with_context
@@ -18,22 +17,28 @@ db.initialize()
 app = Flask(__name__)
 CORS(app)
 origin_token = os.getenv("CLOUDFRONT_ORIGIN_TOKEN")
-public_demo = os.getenv("PUBLIC_DEMO") == "true"
-if public_demo:
+session_key = os.getenv("SESSION_SIGNING_KEY")
+if origin_token and not session_key:
+    raise RuntimeError("SESSION_SIGNING_KEY is required for hosted deployments")
+if session_key:
     app.config.update(
-        SECRET_KEY=os.environ["DEMO_SESSION_KEY"],
+        SECRET_KEY=session_key,
+        SESSION_COOKIE_NAME="greenstay_session",
         SESSION_COOKIE_SECURE=True,
         SESSION_COOKIE_SAMESITE="Lax",
     )
-    demo_email_recipient = os.environ["DEMO_EMAIL_RECIPIENT"]
 
 
-def demo_hotel_id():
-    return session.get("hotel_id", "") if public_demo else None
+def session_hotel_id():
+    return session.get("hotel_id", "") if session_key else None
 
 
-def booking_email(recipient, subject, body):
-    return queue_service.push_email_job(demo_email_recipient if public_demo else recipient, subject, body)
+def hotel_access_error(hotel_id):
+    if session_key and not session_hotel_id():
+        return jsonify({"error": "Sign in to your hotel first."}), 401
+    if session_key and session_hotel_id() != hotel_id:
+        return jsonify({"error": "Hotel not found."}), 404
+
 
 @app.before_request
 def check_origin():
@@ -58,13 +63,13 @@ def login():
 
         login_type = payload.get("type")
         if login_type == "hotel":
-            if public_demo:
-                if not demo_hotel_id():
-                    return jsonify({"message": "Register a hotel to start your demo."}), 404
-                return jsonify({"success": True, "hotel_id": demo_hotel_id(), "hotel_name": session["hotel_name"]})
             result = db.hotel_login_verify(payload.get("id"), payload.get("password"))
+            if session_key:
+                session.clear()
+                if result.get("success"):
+                    session["hotel_id"] = result["hotel_id"]
         elif login_type == "customer":
-            result = db.guest_login_verify(payload.get("email"), demo_hotel_id())
+            result = db.guest_login_verify(payload.get("email"), session_hotel_id())
         else:
             return jsonify({"error": "Invalid login type"}), 400
         return jsonify(result), (200 if result.get("success") else 401)
@@ -73,10 +78,17 @@ def login():
         return jsonify({"error": "Internal Server Error"}), 500
 
 
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    if session_key:
+        session.clear()
+    return jsonify({"success": True}), 200
+
+
 @app.route("/api/guest-portal/<booking_id>", methods=["GET"])
 def get_guest_portal_data(booking_id):
     try:
-        result = db.get_guest_portal(booking_id, demo_hotel_id())
+        result = db.get_guest_portal(booking_id, session_hotel_id())
         if not result.get("success"):
             return jsonify({"error": result.get("message")}), 404
         return jsonify(result), 200
@@ -90,17 +102,14 @@ def hotel_registration_route():
     data = request.json
     hotel_name = data.get("hotel_name")
     hotel_email = data.get("hotel_email")
-    password = token_urlsafe(32) if public_demo else data.get("password")
+    password = data.get("password")
     result = db.hotel_registration(hotel_name, hotel_email, password)
-
-    if public_demo and result.get("success"):
-        session.update(hotel_id=result["hotel_id"], hotel_name=hotel_name.strip()[:128])
 
     if result.get("success") and hotel_email:
         message = email_templates.HOTEL_REGISTRATION_BODY.format(
             hotel_name=hotel_name, hotel_id=result.get("hotel_id"), hotel_email=hotel_email
         )
-        booking_email(
+        queue_service.push_email_job(
             hotel_email, email_templates.HOTEL_REGISTRATION_SUBJECT, message
         )
     return jsonify(result), (200 if result.get("success") else 400)
@@ -109,7 +118,7 @@ def hotel_registration_route():
 def check_in_guest(payload):
     hotel_id = payload.get("hotel_id")
     email = payload.get("email")
-    first_stay = email and not db.guest_history(email, demo_hotel_id())
+    first_stay = email and not db.guest_history(email, session_hotel_id())
     result = db.guest_checkin(
         hotel_id=hotel_id,
         email=email,
@@ -129,11 +138,11 @@ def check_in_guest(payload):
             booking_id=result["bookingId"],
             checkin_time=datetime.now().strftime("%I:%M %p"),
         )
-        booking_email(email, subject, message)
+        queue_service.push_email_job(email, subject, message)
 
         if first_stay:
             welcome = email_templates.NEW_GUEST_WELCOME_BODY.format(guest_name=payload.get("name"))
-            booking_email(email, email_templates.NEW_GUEST_WELCOME_SUBJECT, welcome)
+            queue_service.push_email_job(email, email_templates.NEW_GUEST_WELCOME_SUBJECT, welcome)
     return result
 
 
@@ -153,7 +162,7 @@ def send_checkout_email(guest, usage):
         co2=guest.get("co2"),
         discount=guest.get("discount"),
     )
-    booking_email(guest["email"], subject, message)
+    queue_service.push_email_job(guest["email"], subject, message)
 
 
 @app.route("/api/guests", methods=["POST"])
@@ -161,8 +170,8 @@ def handle_guest_entry():
     try:
         payload = request.json
         hotel_id = payload.get("hotel_id")
-        if public_demo and (not demo_hotel_id() or demo_hotel_id() != hotel_id):
-            return jsonify({"error": "Hotel not found in this demo."}), 404
+        if error := hotel_access_error(hotel_id):
+            return error
         status = payload.get("status")
         if status not in ("checked-out", "update-stats"):
             result = check_in_guest(payload)
@@ -178,13 +187,13 @@ def handle_guest_entry():
 
         if status == "checked-out":
             guest = db.checkout_guest(booking_id, hotel_id, usage, co2, discount)
-            if public_demo and not guest:
+            if session_key and not guest:
                 return jsonify({"error": "Active booking not found."}), 404
             send_checkout_email(guest, usage)
             return jsonify({"status": "Checked out"}), 200
 
         updated = db.update_guest_stats(booking_id, hotel_id, usage, co2, discount)
-        if public_demo and updated is False:
+        if session_key and updated is False:
             return jsonify({"error": "Booking not found."}), 404
         return jsonify({"status": "Updated", "co2": co2, "discount": discount}), 200
     except Exception as exc:
@@ -194,8 +203,8 @@ def handle_guest_entry():
 
 @app.route("/api/guests/<hotel_id>", methods=["GET"])
 def get_guests(hotel_id):
-    if public_demo and demo_hotel_id() != hotel_id:
-        return jsonify({"error": "Hotel not found in this demo."}), 404
+    if error := hotel_access_error(hotel_id):
+        return error
     items = db.get_all_guests(hotel_id)
     items.sort(key=lambda item: (item.get("status") != "checked-in", item.get("timestamp", "")))
     return jsonify(db.convert_decimals(items)), 200
@@ -235,8 +244,8 @@ def csv_response(records, columns, filename):
 
 @app.route("/api/download/hotel/<hotel_id>", methods=["GET"])
 def download_hotel_data(hotel_id):
-    if public_demo and demo_hotel_id() != hotel_id:
-        return jsonify({"error": "Hotel not found in this demo."}), 404
+    if error := hotel_access_error(hotel_id):
+        return error
     guests = db.get_all_guests(hotel_id)
     if not guests:
         return jsonify({"error": "No data"}), 404
@@ -253,7 +262,7 @@ def download_guest_data():
     email = (request.json or {}).get("email")
     if not email:
         return jsonify({"error": "Email required"}), 400
-    history = db.guest_history(email, demo_hotel_id())
+    history = db.guest_history(email, session_hotel_id())
     if not history:
         return jsonify({"error": "No history"}), 404
 

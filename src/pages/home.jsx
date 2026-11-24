@@ -28,9 +28,6 @@ export default function Home() {
         <p className="text-xl text-slate-500 font-light leading-relaxed">
           The modern way to track, manage, and reduce your carbon footprint during your hotel stays.
         </p>
-        {process.env.REACT_APP_PUBLIC_DEMO === "true" && (
-          <p className="text-sm text-slate-500">Start in the Hotel Portal and use sample details for your bookings.</p>
-        )}
       </div>
 
       {/* Navigation Cards */}

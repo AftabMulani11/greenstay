@@ -8,7 +8,7 @@
 
 ## 1. End-to-End Architecture Overview
 
-The hosted interview demo uses Caddy on the Elastic IP to serve React over HTTPS and forward API requests to Flask.
+The hosted application uses Caddy on the Elastic IP to serve React over HTTPS and forward API requests to Flask.
 
 ```text
 Browser ── HTTPS ──► Caddy on the ECS EC2 host
@@ -17,7 +17,7 @@ Browser ── HTTPS ──► Caddy on the ECS EC2 host
                                            └── SNS ──► SQS ──► Lambda ──► SES
                                                         └── DLQ after three failed receives
 
-The DynamoDB table uses on-demand capacity and TTL. The hosted demo uses PostgreSQL.
+The DynamoDB table uses on-demand capacity and TTL. The hosted application uses PostgreSQL.
 ```
 
 ---
@@ -27,8 +27,8 @@ The DynamoDB table uses on-demand capacity and TTL. The hosted demo uses Postgre
 | SAA-C03 Domain | AWS Services Used | Role in GreenStay | Cost & Free-Tier Guardrails |
 | :--- | :--- | :--- | :--- |
 | **Networking** | VPC (`10.0.0.0/16`), 2 Public Subnets (`us-east-1a/b`), 2 Private Subnets (`us-east-1a/b`), Internet Gateway, **VPC Gateway Endpoints (S3 & DynamoDB)** | Isolates RDS in private subnets while keeping ECS EC2 reachable in public subnets. Gateway Endpoints route S3/DynamoDB traffic privately at $0.00. | **Skip NAT Gateways** (~$32/mo + data charges) and **skip ALBs** (~$16/mo). |
-| **Compute & HTTPS** | **S3**, **ECR**, **ECS on EC2 (`t3.micro`) + Auto Scaling Group** | Caddy serves the React build from private S3 and proxies the API to Flask on ECS. | Keep the ASG at one instance and tear down the demo when finished. |
-| **Data Tier** | **RDS PostgreSQL (`db.t3.micro`)** + **DynamoDB** | RDS stores hotel, guest, and booking data. Layer 2 also provisions an on-demand DynamoDB table with TTL. | Use single-AZ RDS with a small volume and short backup retention for the demo. |
+| **Compute & HTTPS** | **S3**, **ECR**, **ECS on EC2 (`t3.micro`) + Auto Scaling Group** | Caddy serves the React build from private S3 and proxies the API to Flask on ECS. | Keep the ASG at one instance and tear down the stack when finished. |
+| **Data Tier** | **RDS PostgreSQL (`db.t3.micro`)** + **DynamoDB** | RDS stores hotel, guest, and booking data. Layer 2 also provisions an on-demand DynamoDB table with TTL. | Use single-AZ RDS with a small volume and short backup retention for the deployment. |
 | **Decoupling & Serverless** | **SNS**, **SQS + Dead-Letter Queue (DLQ)**, **Lambda (`lambda_email.py`)**, **SES** | Fan-out decoupling: backend publishes booking events to SNS → SQS buffers jobs → Lambda processes and sends guest emails via SES. | Always-free monthly allowances cover low-volume Lambda, SQS, SNS, and SES usage. |
 | **Security & Identity** | **IAM Roles / Instance Profiles**, **Security Groups**, **SSM Parameter Store + KMS** | Least-privilege IAM roles replace static keys; Security Groups restrict RDS port `5432` strictly to EC2 SG; DB credentials live encrypted in SSM. | Use Standard SSM parameters and AWS-managed KMS keys ($0.00). |
 | **Observability** | **CloudWatch Logs & Alarms**, **CloudTrail** | Centralizes ECS/Lambda logs, alerts via SNS on high CPU or SQS DLQ depth > 0, and audits account API activity. | Set explicit CloudWatch log retention (e.g., `7 days`) to stay well under the 5 GB log limit. |
@@ -69,4 +69,4 @@ greenstay/
 ### Part 2: Cloud Deployment (`us-east-1`)
 1. Run `.\DevOps\deploy.ps1 -SesSenderEmail 'you@example.com'` from the repository root. The first run asks for approval to create the artifact destinations before publishing. The second apply creates the rest of the stack in the same state.
 2. Review the HTTPS URL, verify the SES sender email, and follow a sample booking through checkout. The script records the account and release inputs in `infra/release.auto.tfvars.json`. Subsequent deployments can reuse the saved sender.
-3. When the demo is finished, run `terraform '-chdir=infra' destroy` from the same workspace. Retain the local state and release inputs until the destroy finishes. The destroy removes ECR images and S3 objects and skips the final RDS snapshot.
+3. When the deployment is no longer needed, run `terraform '-chdir=infra' destroy` from the same workspace. Retain the local state and release inputs until the destroy finishes. The destroy removes ECR images and S3 objects and skips the final RDS snapshot.

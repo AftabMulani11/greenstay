@@ -108,8 +108,8 @@ output "host_autoscaling_group_name" {
   value       = aws_autoscaling_group.host.name
 }
 
-output "demo_url" {
-  description = "Browser URL for the hosted GreenStay demo."
+output "application_url" {
+  description = "Browser URL for the hosted GreenStay app."
   value       = "https://${aws_eip.origin.public_ip}"
 }
 

@@ -36,10 +36,10 @@ try {
     Invoke-Checked terraform $terraformRoot init -input=false
     $stamp = Get-Date -Format 'yyyyMMddHHmmss'
     $suffix = [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $release = "demo-$stamp-$suffix"
+    $release = "release-$stamp-$suffix"
     $frontendImage = "greenstay-frontend:$release"
     $frontendBuild = Join-Path $repo ".cache/$release"
-    Invoke-Checked docker build --target build --build-arg REACT_APP_PUBLIC_DEMO=true -f DevOps/Dockerfile.frontend -t $frontendImage .
+    Invoke-Checked docker build --target build -f DevOps/Dockerfile.frontend -t $frontendImage .
     $container = Invoke-Checked docker create $frontendImage
     try {
         New-Item -ItemType Directory -Path $frontendBuild -Force | Out-Null
@@ -81,7 +81,7 @@ try {
     [IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json))
     Invoke-Checked terraform $terraformRoot apply
 
-    $url = Invoke-Checked terraform $terraformRoot output -raw demo_url
+    $url = Invoke-Checked terraform $terraformRoot output -raw application_url
     Write-Host "Waiting for the React build and Flask API at $url"
     $deadline = (Get-Date).AddMinutes(5)
     while ((Get-Date) -lt $deadline) {

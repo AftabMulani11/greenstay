@@ -2,7 +2,7 @@
 
 GreenStay helps hotels track guest stays, resource usage, and carbon emissions. Hotel staff record check-ins, update electricity, water, meal, and laundry usage, and check guests out. Hotel and guest dashboards show emissions and stay history, with CSV exports for both.
 
-The AWS demo opens in a browser without a password prompt. Register a sample hotel to start a session, then use the email entered at check-in to open the guest view in the same browser. The session limits access to that browser's sample property and bookings.
+On AWS, sign in with your hotel ID and password. The browser session limits access to that property and its bookings. To open the guest view in the same browser, use the email entered at check-in.
 
 ## AWS architecture
 
@@ -36,7 +36,7 @@ flowchart LR
 ```
 
 - **Network and security.** The VPC has two public and two private subnets across two Availability Zones, an internet gateway, and S3 and DynamoDB gateway endpoints. Security groups expose ports 80 and 443 for certificate validation, redirects, and HTTPS. The Flask port stays private, and only the ECS host security group can reach PostgreSQL. SSM Parameter Store holds encrypted secrets, and workload IAM roles scope AWS access.
-- **Data and messaging.** The deployed app uses private, Single-AZ RDS PostgreSQL on `db.t3.micro` for hotels, guests, and bookings. Terraform also provisions an on-demand DynamoDB table with `expires_at` TTL. ECR stores the immutable backend images. Flask publishes email jobs to SNS, which delivers them to SQS. The Lambda event source mapping enables `ReportBatchItemFailures` so failed messages can retry individually and reach the dead-letter queue. SES sends demo emails to the verified demo inbox.
+- **Data and messaging.** The deployed app uses private, Single-AZ RDS PostgreSQL on `db.t3.micro` for hotels, guests, and bookings. Terraform also provisions an on-demand DynamoDB table with `expires_at` TTL. ECR stores the immutable backend images. Flask publishes email jobs to SNS, which delivers them to SQS. The Lambda event source mapping enables `ReportBatchItemFailures` so failed messages can retry individually and reach the dead-letter queue. SES sends email to the booking or registration address.
 - **Compute and hosting.** An Auto Scaling group with minimum, desired, and maximum capacity set to one runs the ECS host. Caddy serves the React build downloaded from private S3 and proxies same-origin API requests to Flask. The stack uses no NAT gateway, ALB, EKS, or CloudFront.
 - **Observability.** CloudWatch retains ECS and Lambda logs for seven days and alarms on host CPU and visible messages in the email dead-letter queue. CloudTrail delivers management events to a separate private S3 bucket.
 
@@ -74,10 +74,10 @@ Start Docker Desktop and run each PowerShell command from the repository root.
 
 | Setting | Purpose |
 | --- | --- |
-| `DB_BACKEND` | Compose and the AWS demo use `postgres`. The application also has a DynamoDB adapter selected by `dynamodb`. |
+| `DB_BACKEND` | Compose and AWS use `postgres`. The application also has a DynamoDB adapter selected by `dynamodb`. |
 | `DATABASE_URL` | PostgreSQL connection URL used by Compose. AWS uses the standard `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, and `PGSSLMODE` settings. |
 | `EMAIL_TRANSPORT` | Compose uses `smtp` with `SMTP_HOST`, `SMTP_PORT`, and `SMTP_FROM`. AWS uses `sns` with `SNS_TOPIC_ARN`. Direct `sqs` mode uses `SQS_QUEUE_URL`. |
-| `REACT_APP_PUBLIC_DEMO` and `PUBLIC_DEMO` | Enable the hosted browser-session flow in React and Flask, respectively. The AWS deployment sets both. |
+| `SESSION_SIGNING_KEY` | Terraform injects the signing key for secure hotel session cookies on AWS. |
 
 ## Terraform deployment
 
@@ -87,7 +87,7 @@ Use Docker Desktop, AWS CLI credentials for the deployment account, and Terrafor
 
 Run `.\DevOps\deploy.ps1 -SesSenderEmail 'you@example.com'` for the first release. The script initializes Terraform and builds React. On the first run, it asks for approval to create ECR and S3. It then builds and pushes the backend image and uploads React to `site/<release>/` in private S3. Review and approve the full Terraform plan when prompted. The script checks the site and `/api/healthz` before printing the HTTPS URL.
 
-Verify the SES sender in `us-east-1` before testing email. For later releases, run `.\DevOps\deploy.ps1` to reuse the saved sender and roll out both builds.
+Verify the SES sender in `us-east-1` before testing email. In the SES sandbox, recipients also need verification. For later releases, run `.\DevOps\deploy.ps1` to reuse the saved sender and roll out both builds.
 
 ### Review infrastructure changes
 
@@ -98,7 +98,7 @@ Run each command separately. A full plan or apply uses the local release inputs 
 - Validate the stack with `terraform '-chdir=infra' validate`.
 - Review the plan with `terraform '-chdir=infra' plan`.
 - Apply infrastructure changes with `terraform '-chdir=infra' apply` and review the plan it presents.
-- Print the deployed URL with `terraform '-chdir=infra' output -raw demo_url`.
+- Print the deployed URL with `terraform '-chdir=infra' output -raw application_url`.
 
 ### Tear down the stack
 

@@ -6,17 +6,14 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { postJson } from "../utils/api";
 import { phoneCountries } from "../utils/phoneCountries";
 
-const publicDemo = process.env.REACT_APP_PUBLIC_DEMO === "true";
-
 export default function HotelDashboard() {
   const navigate = useNavigate();
   const { state } = useLocation();
   
-  const [hotel, setHotel] = useState(() => publicDemo ? null : {
+  const [hotel] = useState(() => ({
     hotel_id: state?.hotel_id || localStorage.getItem("hotel_id"),
     hotel_name: state?.hotelName || localStorage.getItem("hotel_name") || "Grand Hotel",
-  });
-  const [sessionError, setSessionError] = useState(false);
+  }));
   const hotelId = hotel?.hotel_id;
   const hotelName = hotel?.hotel_name;
   
@@ -25,36 +22,12 @@ export default function HotelDashboard() {
   const [isCheckOutOpen, setIsCheckOutOpen] = useState(false);
   const [selectedGuest, setSelectedGuest] = useState(null);
 
-  const startNewDemo = useCallback(() => {
+  const returnToLogin = useCallback(() => {
     localStorage.removeItem("hotel_id");
     localStorage.removeItem("hotel_name");
-    toast.info("This demo session ended. Register a sample hotel to continue.");
+    toast.info("Your session expired. Sign in to continue.");
     navigate("/login/hotel", { replace: true });
   }, [navigate]);
-
-  useEffect(() => {
-    if (!publicDemo) return;
-    let active = true;
-
-    async function loadHotel() {
-      try {
-        const response = await postJson("/api/login", { type: "hotel" });
-        if (!active) return;
-        if (response.status === 404) {
-          startNewDemo();
-          return;
-        }
-        if (!response.ok) throw new Error("Could not load the demo session");
-        const currentHotel = await response.json();
-        if (active) setHotel(currentHotel);
-      } catch {
-        if (active) setSessionError(true);
-      }
-    }
-
-    loadHotel();
-    return () => { active = false; };
-  }, [startNewDemo]);
 
   // Persist session
   useEffect(() => {
@@ -68,8 +41,8 @@ export default function HotelDashboard() {
     if (!hotelId) return;
     try {
       const res = await fetch(`/api/guests/${hotelId}`);
-      if (publicDemo && res.status === 404) {
-        startNewDemo();
+      if (res.status === 401) {
+        returnToLogin();
         return;
       }
 
@@ -81,10 +54,9 @@ export default function HotelDashboard() {
       console.error("Failed to fetch guests:", error);
       toast.error("Could not load guest data");
     }
-  }, [hotelId, startNewDemo]);
+  }, [hotelId, returnToLogin]);
 
   useEffect(() => {
-    if (publicDemo && !hotelId) return;
     if (!hotelId) {
       toast.error("Session expired. Please login again.");
       navigate("/login/hotel");
@@ -144,8 +116,8 @@ export default function HotelDashboard() {
 
       const data = await res.json();
 
-      if (publicDemo && res.status === 404 && data.error === "Hotel not found in this demo.") {
-        startNewDemo();
+      if (res.status === 401) {
+        returnToLogin();
         return;
       }
       if (!res.ok) throw new Error(data.error || data.status || "Check-in failed");
@@ -257,15 +229,6 @@ export default function HotelDashboard() {
 
   const isSelectedGuestCheckedOut = selectedGuest?.status === 'checked-out';
 
-  if (publicDemo && !hotelId) {
-    return (
-      <div className="min-h-screen grid place-content-center gap-4 text-center" role="status">
-        {sessionError ? "Could not load this demo session." : "Loading your demo hotel…"}
-        {sessionError && <Button onClick={() => navigate(0)}>Retry</Button>}
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50/50 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -297,7 +260,14 @@ export default function HotelDashboard() {
                 <Download className="w-4 h-4"/> Download Data
              </Button>
 
-             <Button variant="secondary" onClick={() => {
+             <Button variant="secondary" onClick={async () => {
+                 try {
+                   const response = await postJson("/api/logout", {});
+                   if (!response.ok) throw new Error("Sign out failed");
+                 } catch {
+                   toast.error("Could not sign out. Please try again.");
+                   return;
+                 }
                  localStorage.removeItem("hotel_id");
                  localStorage.removeItem("hotel_name");
                  navigate("/");

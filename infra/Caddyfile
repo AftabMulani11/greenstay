@@ -1,6 +1,6 @@
 {
 	admin off
-	default_sni {$DEMO_IP}
+	default_sni {$SITE_IP}
 }
 
 (flask) {
@@ -10,7 +10,7 @@
 	}
 }
 
-https://{$DEMO_IP} {
+https://{$SITE_IP} {
 	tls {
 		issuer acme {
 			dir https://acme-v02.api.letsencrypt.org/directory

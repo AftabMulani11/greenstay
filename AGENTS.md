@@ -16,9 +16,9 @@ GreenStay is an AWS SAA-C03 reference deployment in `us-east-1`. Keep the deploy
 
 ## Current state
 
-- Use the `demo_url` output after deploying.
+- Use the `application_url` output after deploying.
 - Terraform generates the database password into SSM and reads it for RDS through an ephemeral resource. Both writes use `database_password_version`. Keep the state private because it contains the proxy token and session signing key.
-- The deployment pins the backend image by digest and publishes React under `site/<release>/`. The Flask port stays closed to internet traffic. Hotel registration starts a password-free session scoped to the sample property in that browser. Guests use the email entered during check-in in the same browser. Demo emails go to the verified SES inbox.
+- The deployment pins the backend image by digest and publishes React under `site/<release>/`. The Flask port stays closed to internet traffic. Hotel sign-in uses the registered password and scopes the browser session to that property. Guests use the email entered during check-in in the same browser. SES sends mail to the registration or booking address.
 
 ## Local verification
 

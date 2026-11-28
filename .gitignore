@@ -30,3 +30,4 @@ crash.log
 graphify-out/
 .graphifyignore
 .graphify_analysis.json
+AGENTS.md

@@ -1,87 +1,109 @@
-> **Kubernetes:** [`k8s/`](k8s/) migrates all four services to Kubernetes (Deployments, HPA, Ingress, probes) with a Prometheus + Grafana monitoring stack — see [k8s/README.md](k8s/README.md).
+# GreenStay
 
-<div align="center">
+GreenStay helps hotels track guest stays, resource usage, and carbon emissions. Hotel staff record check-ins, update electricity, water, meal, and laundry usage, and check guests out. Hotel and guest dashboards show emissions and stay history, with CSV exports for both.
 
-# 🏨 GreenStay — Hotel Operations Platform
+The AWS demo opens in a browser without a password prompt. Register a sample hotel to start a session, then use the email entered at check-in to open the guest view in the same browser. The session limits access to that browser's sample property and bookings.
 
-**Production-style, fault-tolerant cloud architecture: if the email service dies, bookings keep flowing.**
+## AWS architecture
 
-![AWS](https://img.shields.io/badge/AWS-0b0b0e?style=for-the-badge&logo=amazonwebservices&logoColor=FF9900)
-![Flask](https://img.shields.io/badge/Flask-0b0b0e?style=for-the-badge&logo=flask&logoColor=white)
-![React](https://img.shields.io/badge/React-0b0b0e?style=for-the-badge&logo=react&logoColor=61DAFB)
-![Docker](https://img.shields.io/badge/Docker-0b0b0e?style=for-the-badge&logo=docker&logoColor=2496ED)
-![Jenkins](https://img.shields.io/badge/Jenkins-0b0b0e?style=for-the-badge&logo=jenkins&logoColor=D24939)
+GreenStay is an AWS Solutions Architect Associate (SAA-C03) reference deployment in `us-east-1`, managed by one Terraform root and one local state in `infra/`.
 
-</div>
-
-## Architecture
-
-**4 independent services** — web, API, worker, notification — so a failure in any one never cascades:
-
-```
-   ┌─────────────┐    HTTP    ┌─────────────┐   enqueue   ┌─────────────┐   trigger   ┌─────────────┐
-   │    WEB      │ ─────────▶ │    API      │ ──────────▶ │   WORKER    │ ──────────▶ │NOTIFICATION │
-   │React+Tailwind│           │ Flask REST  │             │  AWS SQS    │             │ Lambda + SES│
-   └─────────────┘            └──────┬──────┘             └─────────────┘             └─────────────┘
-                                     │                     guaranteed                   email delivery
-                                     ▼                     delivery, retries,           fully decoupled
-                              ┌─────────────┐              dead-letter safety           from request path
-                              │  DynamoDB   │
-                              │single-table │
-                              │  + GSI      │
-                              └─────────────┘
-```
-
-### Why the async 3-stage pipeline matters
-
-A hotel booking triggers a confirmation email. Naïve design sends it inline — if SES is slow or down, **the guest's booking request hangs or fails**. GreenStay instead:
-
-1. **API** writes the booking to DynamoDB and drops a message on **SQS** — request returns immediately
-2. **SQS** guarantees delivery with retries and dead-letter safety
-3. **Lambda** consumes the queue and sends via **SES** — email latency never touches the user
-
-## REST API (9 endpoints)
-
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `/api/login` | POST | Hotel-staff authentication |
-| `/api/hotel-registration` | POST | Onboard a new hotel |
-| `/api/guests` | POST | Register guest / create booking (enqueues email) |
-| `/api/guests/<hotel_id>` | GET | List a hotel's guests |
-| `/api/guest-portal/<booking_id>` | GET | Guest self-service portal data |
-| `/calculate` | POST | Stay-cost calculation |
-| `/api/download/hotel/<hotel_id>` | GET | Hotel data export |
-| `/api/download/guest` | POST | Guest data export |
-
-## Data layer
-
-**DynamoDB single-table design** — hotels and guests share one table using `PK`/`SK` composite keys (`HOTEL#id` / `METADATA`, …) with a **GSI on email** for reverse lookups. One table, no joins, predictable single-digit-ms reads.
-
-## CI/CD — 4-stage Jenkins pipeline
-
-```
-Checkout ──▶ Build Locally ──▶ Login & Push to ECR ──▶ Deploy to Elastic Beanstalk
+```mermaid
+flowchart LR
+    Browser["Browser"] -->|"HTTPS via Elastic IP"| Caddy
+    subgraph AWS["AWS us-east-1"]
+        subgraph VPC["VPC 10.0.0.0/16 across two AZs"]
+            subgraph Public["Public subnets"]
+                subgraph EC2["One t3.micro EC2 host"]
+                    Caddy["Caddy"]
+                    Flask["Flask on ECS"]
+                end
+            end
+            subgraph Private["Private subnets"]
+                RDS["Single-AZ RDS PostgreSQL"]
+            end
+            Caddy -->|"/api/* and /calculate"| Flask
+            Flask --> RDS
+        end
+        S3["Private S3 frontend bucket"] -->|"Release downloaded by the host"| Caddy
+        ECR["ECR"] -->|"Backend image by digest"| Flask
+        Flask --> SNS["SNS topic"]
+        SNS --> SQS["SQS queue"]
+        SQS --> Lambda["Email Lambda"]
+        SQS -->|"After three failed receives"| DLQ["Dead-letter queue"]
+        Lambda --> SES["Amazon SES"]
+    end
 ```
 
-Docker images for backend and frontend are built from [DevOps/](DevOps/) Dockerfiles, pushed to **ECR**, and deployed to **Elastic Beanstalk** — modeled production-style with AWS credentials injected via Jenkins credentials store.
+- **Network and security.** The VPC has two public and two private subnets across two Availability Zones, an internet gateway, and S3 and DynamoDB gateway endpoints. Security groups expose ports 80 and 443 for certificate validation, redirects, and HTTPS. The Flask port stays private, and only the ECS host security group can reach PostgreSQL. SSM Parameter Store holds encrypted secrets, and workload IAM roles scope AWS access.
+- **Data and messaging.** The deployed app uses private, Single-AZ RDS PostgreSQL on `db.t3.micro` for hotels, guests, and bookings. Terraform also provisions an on-demand DynamoDB table with `expires_at` TTL. ECR stores the immutable backend images. Flask publishes email jobs to SNS, which delivers them to SQS. The Lambda event source mapping enables `ReportBatchItemFailures` so failed messages can retry individually and reach the dead-letter queue. SES sends demo emails to the verified demo inbox.
+- **Compute and hosting.** An Auto Scaling group with minimum, desired, and maximum capacity set to one runs the ECS host. Caddy serves the React build downloaded from private S3 and proxies same-origin API requests to Flask. The stack uses no NAT gateway, ALB, EKS, or CloudFront.
+- **Observability.** CloudWatch retains ECS and Lambda logs for seven days and alarms on host CPU and visible messages in the email dead-letter queue. CloudTrail delivers management events to a separate private S3 bucket.
 
-## Run locally
+## Repository structure
 
-```bash
-docker-compose up --build
-# Frontend → http://localhost:3000
-# API      → http://localhost:5000
+```text
+src/                         React pages, components, and API helpers
+backend/                     Flask API, database adapters, email publisher, and Lambda handler
+DevOps/
+  Dockerfile.backend          Flask container image
+  Dockerfile.frontend         React build and local Nginx image
+  nginx.conf                 Local frontend and API proxy
+  smoke-test.ps1              Local booking and email smoke test
+  deploy.ps1                  Build, publish, and deploy to AWS
+infra/
+  network.tf                  VPC, subnets, endpoints, security groups, and SSM
+  data.tf                     ECR, PostgreSQL, DynamoDB, and the email pipeline
+  compute.tf                  ECS, EC2, S3, CloudWatch, and CloudTrail
+  Caddyfile                   HTTPS frontend and API routing
+  versions.tf                 Terraform and provider requirements
+  variables.tf                Stack and release inputs
+  outputs.tf                  Deployment URL and resource identifiers
+  terraform.tfvars.example    Optional settings example
+docker-compose.yml           Local services
 ```
 
-## Tech stack
+## Local development
 
-| Layer | Tech |
-|---|---|
-| Frontend | React, Tailwind CSS |
-| Backend | Flask (Python), REST |
-| Async pipeline | AWS SQS → Lambda → SES |
-| Database | DynamoDB (single-table + GSI) |
-| Containers | Docker, Docker Compose, Nginx |
-| CI/CD | Jenkins → ECR → Elastic Beanstalk |
+Start Docker Desktop and run each PowerShell command from the repository root.
 
-> 🔒 No credentials in this repo — AWS access is environment-injected; the app degrades gracefully when AWS resources are unavailable.
+1. Build and start React, Nginx, Flask, PostgreSQL, and Mailpit with `docker compose up --build -d --wait`.
+2. Open [GreenStay](http://127.0.0.1/) and [Mailpit](http://127.0.0.1:8025/). Nginx serves React and forwards `/api` requests to Flask.
+3. Verify registration, check-in, usage updates, checkout, CSV export, and email capture with `.\DevOps\smoke-test.ps1`.
+4. Stop the stack and keep the PostgreSQL volume with `docker compose down`.
+
+| Setting | Purpose |
+| --- | --- |
+| `DB_BACKEND` | Compose and the AWS demo use `postgres`. The application also has a DynamoDB adapter selected by `dynamodb`. |
+| `DATABASE_URL` | PostgreSQL connection URL used by Compose. AWS uses the standard `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, and `PGSSLMODE` settings. |
+| `EMAIL_TRANSPORT` | Compose uses `smtp` with `SMTP_HOST`, `SMTP_PORT`, and `SMTP_FROM`. AWS uses `sns` with `SNS_TOPIC_ARN`. Direct `sqs` mode uses `SQS_QUEUE_URL`. |
+| `REACT_APP_PUBLIC_DEMO` and `PUBLIC_DEMO` | Enable the hosted browser-session flow in React and Flask, respectively. The AWS deployment sets both. |
+
+## Terraform deployment
+
+The GitHub Actions workflow builds and publishes releases, then applies them after review. See [CI/CD setup](DevOps/CI-CD.md) for the separate S3 state bootstrap, OIDC roles, migration, and GitHub environment settings.
+
+Use Docker Desktop, AWS CLI credentials for the deployment account, and Terraform 1.11 or later in the 1.x series. Run the commands from the repository root. See [the example inputs](infra/terraform.tfvars.example) for optional settings.
+
+### Deploy or roll out a release
+
+Run `.\DevOps\deploy.ps1 -SesSenderEmail 'you@example.com'` for the first release. The script initializes Terraform and builds React. On the first run, it asks for approval to create ECR and S3. It then builds and pushes the backend image and uploads React to `site/<release>/` in private S3. Review and approve the full Terraform plan when prompted. The script checks the site and `/api/healthz` before printing the HTTPS URL.
+
+Verify the SES sender in `us-east-1` before testing email. For later releases, run `.\DevOps\deploy.ps1` to reuse the saved sender and roll out both builds.
+
+### Review infrastructure changes
+
+Run each command separately. A full plan or apply uses the local release inputs written by the deploy script after publishing the builds.
+
+- Initialize providers with `terraform '-chdir=infra' init`.
+- Check formatting with `terraform '-chdir=infra' fmt -check`.
+- Validate the stack with `terraform '-chdir=infra' validate`.
+- Review the plan with `terraform '-chdir=infra' plan`.
+- Apply infrastructure changes with `terraform '-chdir=infra' apply` and review the plan it presents.
+- Print the deployed URL with `terraform '-chdir=infra' output -raw demo_url`.
+
+### Tear down the stack
+
+Run `terraform '-chdir=infra' destroy` and review the plan before confirming. This takes the site offline and deletes its data, ECR images, and S3 objects. RDS skips the final snapshot.
+
+Keep `infra/terraform.tfstate` and `infra/release.auto.tfvars.json` private and available until teardown finishes. Verify the state is empty with `terraform '-chdir=infra' state list`.

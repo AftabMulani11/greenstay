@@ -1,0 +1,36 @@
+{
+	admin off
+	default_sni {$DEMO_IP}
+}
+
+(flask) {
+	reverse_proxy 127.0.0.1:5000 {
+		header_up X-GreenStay-Origin {$ORIGIN_TOKEN}
+		header_up -Authorization
+	}
+}
+
+https://{$DEMO_IP} {
+	tls {
+		issuer acme {
+			dir https://acme-v02.api.letsencrypt.org/directory
+			profile shortlived
+			disable_tlsalpn_challenge
+		}
+	}
+
+	encode gzip
+	@api path /api /api/* /calculate
+	handle @api {
+		import flask
+	}
+	handle /static/* {
+		root * /srv
+		file_server
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

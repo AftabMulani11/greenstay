@@ -15,13 +15,13 @@ const App = () => (
     {/* Global Toast Provider */}
     <Toaster position="top-right" richColors />
     
-    <BrowserRouter>
+    {/* Application Routing (basename supports GitHub Pages subpath deploys) */}
+    <BrowserRouter basename={process.env.PUBLIC_URL || "/"}>
       <Routes>
         <Route path="/" element={<Home />} />
         {/* Dynamic route for login type (hotel or customer) */}
         <Route path="/login/:type" element={<Login />} />
         
-        {/* Protected Routes */}
         <Route path="/hotel-dashboard" element={<HotelDashboard />} />
         <Route path="/guest/:id" element={<GuestEntry />} /> 
         <Route path="/customer-dashboard" element={<CustomerDashboard />} />

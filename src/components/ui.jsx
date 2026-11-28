@@ -124,23 +124,6 @@ const Select = ({ value, onChange, options = [], placeholder = "Select...", clas
 };
 
 /**
- * Checkbox Component
- * Simple wrapper around native checkbox with custom styling hooks.
- */
-const Checkbox = React.forwardRef(({ className, ...props }, ref) => (
-  <input
-    type="checkbox"
-    ref={ref}
-    className={cn(
-      "h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 accent-primary",
-      className
-    )}
-    {...props}
-  />
-));
-Checkbox.displayName = "Checkbox";
-
-/**
  * Label Component
  * Standard label for form inputs.
  */
@@ -264,7 +247,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
 };
 
 export { 
-  Button, Input, Select, Checkbox, Label, Badge,
+  Button, Input, Select, Label, Badge,
   Card, CardHeader, CardTitle, CardDescription, CardContent,
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
   Modal

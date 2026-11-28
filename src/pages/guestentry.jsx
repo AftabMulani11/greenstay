@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Label, Badge } from "../components/ui";
 import { ArrowLeft, Save, Zap, Droplets, Utensils, Shirt, Mail, Phone, Lock, Award } from "lucide-react"; 
 import { toast } from "sonner";
+import { postJson } from "../utils/api";
 
 /**
  * Guest Entry Component
@@ -94,11 +95,7 @@ export default function GuestEntry() {
     };
 
     try {
-      const saveRes = await fetch('/api/guests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const saveRes = await postJson('/api/guests', payload);
 
       const data = await saveRes.json();
       if (!saveRes.ok) throw new Error("Update failed");

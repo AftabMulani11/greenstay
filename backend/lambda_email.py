@@ -1,53 +1,52 @@
 import json
-import boto3
+import logging
 import os
+from functools import lru_cache
 
-# Initialize SES client (pulls credentials from Lambda Execution Role automatically)
-ses = boto3.client("ses", region_name=os.environ.get("AWS_REGION", "eu-west-1"))
-SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
+
+logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def ses_client():
+    return boto3.client("ses", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
 
 def lambda_handler(event, context):
-    """
-    AWS Lambda handler function.
-    Triggered by SQS Event.
-    """
-    if not SENDER_EMAIL:
-        print("CRITICAL: SENDER_EMAIL environment variable not set.")
-        return {"statusCode": 500, "body": "Configuration Error"}
+    records = event["Records"]
+    sender = os.getenv("SENDER_EMAIL")
+    if not sender:
+        logger.error("SENDER_EMAIL is required")
+        return {
+            "batchItemFailures": [{"itemIdentifier": record["messageId"]} for record in records]
+        }
 
-    print(f"Received batch of {len(event['Records'])} messages.")
-
-    for record in event["Records"]:
+    failures = []
+    for record in records:
         try:
-            # 1. Parse the SQS message body
             payload = json.loads(record["body"])
+            if isinstance(payload, dict) and payload.get("Type") == "Notification":
+                payload = json.loads(payload["Message"])
+            if not isinstance(payload, dict) or not all(
+                isinstance(payload.get(field), str) and payload[field].strip()
+                for field in ("to_address", "subject", "body")
+            ):
+                raise ValueError("Invalid email payload")
 
-            to_address = payload.get("to_address")
-            subject = payload.get("subject")
-            body_text = payload.get("body")
-
-            if not to_address or not body_text:
-                print("Skipping invalid message payload.")
-                continue
-
-            print(f"Sending email to: {to_address}")
-
-            # 2. Send Email via SES
-            ses.send_email(
-                Source=SENDER_EMAIL,
-                Destination={"ToAddresses": [to_address]},
+            ses_client().send_email(
+                Source=sender,
+                Destination={"ToAddresses": [payload["to_address"]]},
                 Message={
-                    "Subject": {"Data": subject, "Charset": "UTF-8"},
-                    "Body": {"Text": {"Data": body_text, "Charset": "UTF-8"}},
+                    "Subject": {"Data": payload["subject"], "Charset": "UTF-8"},
+                    "Body": {"Text": {"Data": payload["body"], "Charset": "UTF-8"}},
                 },
             )
-            print(f"SUCCESS: Email sent to {to_address}")
+        except (BotoCoreError, ClientError, KeyError, TypeError, ValueError) as error:
+            message_id = record["messageId"]
+            logger.warning("Email job %s failed (%s)", message_id, type(error).__name__)
+            failures.append({"itemIdentifier": message_id})
 
-        except Exception as e:
-            # Log error but don't crash the whole batch
-            print(f"ERROR processing message {record['messageId']}: {str(e)}")
-            # Optional: Raise exception to trigger SQS Retry for this specific batch
-            # raise e
-
-    return {"statusCode": 200, "body": json.dumps("Batch processing complete")}
+    return {"batchItemFailures": failures}

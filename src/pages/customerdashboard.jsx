@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription, Button, Badg
 import { useLocation, useNavigate } from "react-router-dom";
 import { Award, ArrowLeft, Building2, History, RefreshCw, Zap, Droplets, Utensils, Shirt, Clock, User, Mail, Phone, Download, BedDouble } from "lucide-react";
 import { toast } from "sonner";
+import { postJson } from "../utils/api";
 
 /**
  * Helper: Formats ISO date strings to Indian Standard Time (IST)
@@ -111,11 +112,7 @@ export default function CustomerDashboard() {
     }
 
     try {
-        const response = await fetch('/api/download/guest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: guestData.email })
-        });
+        const response = await postJson('/api/download/guest', { email: guestData.email });
 
         if (!response.ok) {
             const errorData = await response.json();

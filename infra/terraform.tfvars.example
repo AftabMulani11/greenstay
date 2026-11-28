@@ -1,0 +1,4 @@
+# DevOps/deploy.ps1 records the account, sender, and release in a local file.
+# Set optional values in terraform.tfvars before deploying.
+# project_name = "greenstay"
+# alarm_email  = "you@example.com"

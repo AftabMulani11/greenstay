@@ -1,25 +1,60 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Card, CardHeader, CardTitle, CardContent, CardDescription, Button, Input, Select, Label, Table, TableHeader, TableRow, TableHead, TableBody, TableCell, Modal, Badge } from "../components/ui";
+import { Card, CardTitle, CardContent, CardDescription, Button, Input, Select, Label, Table, TableHeader, TableRow, TableHead, TableBody, TableCell, Modal, Badge } from "../components/ui";
 import { toast } from "sonner";
-import { Leaf, LogOut, UserPlus, Hash, User, BedDouble, Save, CheckCircle, Calendar, Mail, Phone, Clock, Activity, Loader2, Download, Lock } from "lucide-react";
+import { Leaf, LogOut, UserPlus, Hash, User, BedDouble, Save, CheckCircle, Calendar, Mail, Phone, Clock, Activity, Download, Lock } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useCountries } from "../Hooks/use-countries";
+import { postJson } from "../utils/api";
+import { phoneCountries } from "../utils/phoneCountries";
+
+const publicDemo = process.env.REACT_APP_PUBLIC_DEMO === "true";
 
 export default function HotelDashboard() {
   const navigate = useNavigate();
   const { state } = useLocation();
   
-  // Initialize state from location or localStorage to prevent logout on refresh/back
-  const [hotelId] = useState(() => state?.hotel_id || localStorage.getItem("hotel_id"));
-  const [hotelName] = useState(() => state?.hotelName || localStorage.getItem("hotel_name") || "Grand Hotel");
+  const [hotel, setHotel] = useState(() => publicDemo ? null : {
+    hotel_id: state?.hotel_id || localStorage.getItem("hotel_id"),
+    hotel_name: state?.hotelName || localStorage.getItem("hotel_name") || "Grand Hotel",
+  });
+  const [sessionError, setSessionError] = useState(false);
+  const hotelId = hotel?.hotel_id;
+  const hotelName = hotel?.hotel_name;
   
-  const { countries } = useCountries();
   const [guests, setGuests] = useState([]);
   const [activeTab, setActiveTab] = useState("active"); 
   const [isCheckOutOpen, setIsCheckOutOpen] = useState(false);
   const [selectedGuest, setSelectedGuest] = useState(null);
-  // New State for handling table creation wait
-  const [isSettingUp, setIsSettingUp] = useState(false);
+
+  const startNewDemo = useCallback(() => {
+    localStorage.removeItem("hotel_id");
+    localStorage.removeItem("hotel_name");
+    toast.info("This demo session ended. Register a sample hotel to continue.");
+    navigate("/login/hotel", { replace: true });
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!publicDemo) return;
+    let active = true;
+
+    async function loadHotel() {
+      try {
+        const response = await postJson("/api/login", { type: "hotel" });
+        if (!active) return;
+        if (response.status === 404) {
+          startNewDemo();
+          return;
+        }
+        if (!response.ok) throw new Error("Could not load the demo session");
+        const currentHotel = await response.json();
+        if (active) setHotel(currentHotel);
+      } catch {
+        if (active) setSessionError(true);
+      }
+    }
+
+    loadHotel();
+    return () => { active = false; };
+  }, [startNewDemo]);
 
   // Persist session
   useEffect(() => {
@@ -33,25 +68,23 @@ export default function HotelDashboard() {
     if (!hotelId) return;
     try {
       const res = await fetch(`/api/guests/${hotelId}`);
-      
-      // Handle "Setting up" state from backend
-      if (res.status === 202) {
-          setIsSettingUp(true);
-          return;
+      if (publicDemo && res.status === 404) {
+        startNewDemo();
+        return;
       }
 
       if (res.ok) {
         const data = await res.json();
         setGuests(data);
-        setIsSettingUp(false); // Clear setup state if successful
       }
     } catch (error) {
       console.error("Failed to fetch guests:", error);
       toast.error("Could not load guest data");
     }
-  }, [hotelId]);
+  }, [hotelId, startNewDemo]);
 
   useEffect(() => {
+    if (publicDemo && !hotelId) return;
     if (!hotelId) {
       toast.error("Session expired. Please login again.");
       navigate("/login/hotel");
@@ -87,7 +120,7 @@ export default function HotelDashboard() {
   // State for New Check-In
   const [checkInForm, setCheckInForm] = useState({ 
     date: new Date().toISOString().split('T')[0],
-    name: "", room: "", email: "", countryCode: "+91", phoneNumber: ""
+    name: "", room: "", email: "", phoneCountry: "IN", phoneNumber: ""
   });
 
   const [usageForm, setUsageForm] = useState({
@@ -97,24 +130,25 @@ export default function HotelDashboard() {
   const handleCheckIn = async (e) => {
     e.preventDefault();
     
-    const fullPhone = checkInForm.phoneNumber ? `${checkInForm.countryCode} ${checkInForm.phoneNumber}` : "";
+    const { phoneCountry, phoneNumber, ...guestFields } = checkInForm;
+    const countryCode = phoneCountries.find(country => country.value === phoneCountry).code;
     const payload = { 
-      ...checkInForm, 
-      phone: fullPhone, 
-      hotel_id: hotelId, // Pass ID to backend
+      ...guestFields,
+      phone: phoneNumber ? `${countryCode} ${phoneNumber}` : "",
+      hotel_id: hotelId,
       status: 'checked-in',
     };
 
     try {
-      const res = await fetch('/api/guests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const res = await postJson('/api/guests', payload);
 
       const data = await res.json();
 
-      if (!res.ok) throw new Error("Check-in failed");
+      if (publicDemo && res.status === 404 && data.error === "Hotel not found in this demo.") {
+        startNewDemo();
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || data.status || "Check-in failed");
       
       const generatedId = data.bookingId || data.booking_id;
       toast.success(`Guest Checked In! ID: ${generatedId || nextBookingId}`);
@@ -124,7 +158,7 @@ export default function HotelDashboard() {
       setCheckInForm(prev => ({ ...prev, name: "", room: "", email: "", phoneNumber: "" }));
     } catch (error) {
       console.error(error);
-      toast.error("Failed to save check-in");
+      toast.error(error.message || "Failed to save check-in");
     }
   };
 
@@ -141,7 +175,6 @@ export default function HotelDashboard() {
     setIsCheckOutOpen(true);
   };
 
-  // NEW: Calculate and Save (Without Checkout)
   const handleSaveStats = async (e) => {
     e.preventDefault();
     if (selectedGuest.status === 'checked-out') return; // Safety check
@@ -154,11 +187,7 @@ export default function HotelDashboard() {
         status: 'update-stats' 
       };
 
-      const res = await fetch('/api/guests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const res = await postJson('/api/guests', payload);
 
       if (!res.ok) throw new Error("Update failed");
       const data = await res.json();
@@ -184,11 +213,7 @@ export default function HotelDashboard() {
         status: 'checked-out'
       };
 
-      const res = await fetch('/api/guests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const res = await postJson('/api/guests', payload);
 
       if (!res.ok) throw new Error("Checkout failed");
       
@@ -230,24 +255,16 @@ export default function HotelDashboard() {
   const activeGuests = guests.filter(g => g.status === 'checked-in');
   const historyGuests = guests.filter(g => g.status === 'checked-out');
 
-  // Map countries with flag images for the dropdown
-  const countryOptions = countries.map(c => ({
-    value: c.code,
-    label: (
-      <div className="flex items-center gap-2">
-        <img src={c.flagUrl} alt={c.name} className="w-5 h-3.5 object-cover rounded-sm shadow-sm" />
-        <span>{c.name} ({c.code})</span>
-      </div>
-    ),
-    shortLabel: (
-      <div className="flex items-center gap-2">
-        <img src={c.flagUrl} alt={c.name} className="w-5 h-3.5 object-cover rounded-sm shadow-sm" />
-        <span>{c.code}</span>
-      </div>
-    )
-  }));
-
   const isSelectedGuestCheckedOut = selectedGuest?.status === 'checked-out';
+
+  if (publicDemo && !hotelId) {
+    return (
+      <div className="min-h-screen grid place-content-center gap-4 text-center" role="status">
+        {sessionError ? "Could not load this demo session." : "Loading your demo hotel…"}
+        {sessionError && <Button onClick={() => navigate(0)}>Retry</Button>}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50/50 p-4 md:p-8">
@@ -276,7 +293,7 @@ export default function HotelDashboard() {
              </div>
              
              {/* Download Button */}
-             <Button variant="secondary" onClick={handleDownloadHotelData} className="h-10 gap-2" disabled={isSettingUp || guests.length === 0}>
+             <Button variant="secondary" onClick={handleDownloadHotelData} className="h-10 gap-2" disabled={guests.length === 0}>
                 <Download className="w-4 h-4"/> Download Data
              </Button>
 
@@ -380,9 +397,9 @@ export default function HotelDashboard() {
                     <div className="flex gap-2">
                       <div className="w-[140px]">
                         <Select 
-                          value={checkInForm.countryCode} 
-                          onChange={val => setCheckInForm({...checkInForm, countryCode: val})} 
-                          options={countryOptions} 
+                          value={checkInForm.phoneCountry}
+                          onChange={val => setCheckInForm({...checkInForm, phoneCountry: val})}
+                          options={phoneCountries}
                         />
                       </div>
                       <div className="relative flex-1">
@@ -429,13 +446,6 @@ export default function HotelDashboard() {
             </div>
             
             <div className="flex-1 overflow-auto bg-white">
-              {isSettingUp ? (
-                  <div className="flex flex-col items-center justify-center h-full min-h-[500px] text-slate-500">
-                      <Loader2 className="w-8 h-8 animate-spin mb-4 text-primary" />
-                      <p className="text-lg font-semibold text-slate-700">Setting up the dashboard...</p>
-                      <p className="text-sm">Please refresh in a few moments.</p>
-                  </div>
-              ) : (
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
@@ -492,7 +502,6 @@ export default function HotelDashboard() {
                       )}
                     </TableBody>
                   </Table>
-              )}
             </div>
           </Card>
         </div>
